@@ -24,7 +24,9 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { uploadImageFromUri } from '../lib/uploadImage';
 
+// post.tsx
 const RESOLVE_PRODUCT_URL = 'https://fashion-ai-api.vercel.app/api/resolve-product';
+
 
 type SelectedProduct = {
   url: string;
