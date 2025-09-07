@@ -1,8 +1,30 @@
 {
-  "extends": "expo/tsconfig.base",
+  "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
+    "customConditions": ["react-native"],
+    "target": "ES2021",
+    "lib": [
+      "ES2021",
+      "DOM"
+    ],
+    "jsx": "react-jsx",
+    "moduleResolution": "bundler",
+    "types": [
+      "react",
+      "react-native",
+      "expo-router"
+    ],
     "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    "baseUrl": ".",
     "paths": {
+      "~/*": [
+        "./*"
+      ],
       "@/*": [
         "./*"
       ]
@@ -13,5 +35,11 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
-  ]
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "build"
+  ],
+  "extends": "expo/tsconfig.base"
 }
