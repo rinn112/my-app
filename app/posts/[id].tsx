@@ -32,7 +32,7 @@ type PostRow = {
   bottomsImage?: string | null;
   outerwearImage?: string | null;
   shoesImage?: string | null;
-  selected_product?: SelectedProduct | null; // ★追加
+  selected_product?: SelectedProduct | null;
 };
 
 const BG = '#FDECF2';
@@ -62,6 +62,7 @@ export default function PostDetail() {
     return () => { cancelled = true; };
   }, [ctxHit, id]);
 
+  // いいね状態
   const [userId, setUserId] = useState<string | null>(null);
   const [liked, setLiked] = useState(false);
 
@@ -105,6 +106,9 @@ export default function PostDetail() {
   }
 
   const main = post.mainImage || post.image_url || null;
+  const productUrl = post.selected_product?.url || null;
+  const heroImage = post.selected_product?.image || main;
+
   const items = [
     { key: 'tops', label: 'Tops', uri: post.topsImage },
     { key: 'bottoms', label: 'Bottoms/Skirt', uri: post.bottomsImage },
@@ -117,12 +121,12 @@ export default function PostDetail() {
       <Stack.Screen options={{ headerShown: false, animationTypeForReplace: 'pop', gestureEnabled: true }} />
 
       <View style={styles.container}>
-        {/* 左上 戻る */}
+        {/* 戻る */}
         <TouchableOpacity style={styles.backButton} onPress={goBackSafe} activeOpacity={0.8}>
           <Ionicons name="chevron-back" size={32} color={ACCENT} />
         </TouchableOpacity>
 
-        {/* 右上 ハート（白丸なし） */}
+        {/* いいね */}
         <TouchableOpacity
           style={styles.likeBtn}
           onPress={toggleLike}
@@ -138,15 +142,29 @@ export default function PostDetail() {
         </TouchableOpacity>
 
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 32, paddingTop: 60 }}>
-          {main ? (
-            <Image source={{ uri: main }} style={styles.mainImage} />
+          {/* メイン（選択商品画像があればそれを優先）＋タップでURLへ */}
+          {heroImage ? (
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => openIfUrl(productUrl || heroImage)}
+            >
+              <Image source={{ uri: heroImage }} style={styles.mainImage} />
+            </TouchableOpacity>
           ) : (
             <View style={[styles.mainImage, styles.itemPlaceholder]}>
               <Text style={styles.placeholderText}>メイン画像なし</Text>
             </View>
           )}
 
-          {/* ★ 追加：関連商品（画像タップでURLへ） */}
+          {/* 雰囲気 */}
+          {post.category && (
+            <View style={styles.modeBox}>
+              <Text style={styles.modeLabel}>雰囲気</Text>
+              <Text style={styles.modeValue}>{post.category}</Text>
+            </View>
+          )}
+
+          {/* 関連商品（画像タップでURL） */}
           {post.selected_product?.image && post.selected_product?.url && (
             <View style={{ marginTop: 16, paddingHorizontal: 20 }}>
               <Text style={{ fontWeight: '700', marginBottom: 8 }}>関連商品</Text>
@@ -172,6 +190,7 @@ export default function PostDetail() {
             </View>
           )}
 
+          {/* 部位グリッド（既存） */}
           <View style={styles.grid}>
             {items.map(({ key, label, uri }) => (
               <TouchableOpacity key={key} style={styles.card} activeOpacity={0.85} onPress={() => openIfUrl(uri)}>
@@ -197,35 +216,22 @@ export default function PostDetail() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
   backButton: { position: 'absolute', top: 50, left: 20, zIndex: 10 },
-  likeBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10, padding: 4, backgroundColor: 'transparent' },
-  mainImage: {
-    width: '70%',
-    aspectRatio: 3 / 4,
-    backgroundColor: '#eee',
-    borderRadius: 24,
-    alignSelf: 'center',
-    marginTop: 8,
-  },
-  grid: {
-    marginTop: 16,
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
-  card: { width: '48%', marginBottom: 16 },
-  cardInner: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 12,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  cardLabel: { fontSize: 12, fontWeight: '600', color: '#333', marginBottom: 8 },
-  itemImage: { width: '100%', aspectRatio: 3 / 4, borderRadius: 12, backgroundColor: '#eee' },
-  itemPlaceholder: { alignItems: 'center', justifyContent: 'center' },
-  placeholderText: { fontSize: 12, color: '#999' },
+  likeBtn: { position: 'absolute', top: 50, right: 20, zIndex: 10 },
+
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+
+  mainImage: { width: '90%', alignSelf: 'center', aspectRatio: 3/4, borderRadius: 16, backgroundColor: '#eee' },
+
+  modeBox: { marginTop: 16, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  modeLabel: { fontWeight: '700', color: '#666' },
+  modeValue: { fontWeight: '700', color: '#222' },
+
+  grid: { marginTop: 20, paddingHorizontal: 20, gap: 14 },
+  card: { borderRadius: 12, overflow: 'hidden', backgroundColor: '#fff' },
+  cardInner: { padding: 12, gap: 8 },
+  cardLabel: { fontWeight: '700' },
+
+  itemImage: { width: '100%', aspectRatio: 3/4, borderRadius: 8, backgroundColor: '#eee' },
+  itemPlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  placeholderText: { color: '#999' },
 });

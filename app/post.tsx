@@ -1,4 +1,3 @@
-// app/post.tsx
 import { Ionicons } from '@expo/vector-icons';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -27,14 +26,23 @@ import { uploadImageFromUri } from '../lib/uploadImage';
 const PROJECT_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://xqyztcyliqbhpdekmpjx.supabase.co';
 const ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
-// 商品URLプレビューAPI（既存）
+// 商品URLプレビューAPI（本番）
 const RESOLVE_PRODUCT_URL = 'https://fashion-ai-pd7f25pkb-mayu-shimamuras-projects.vercel.app/api/resolve-product';
+
+// 入力URLを https 化＆/shop/... を zozo.jp に補完
+const normalizeUrl = (u: string) => {
+  const s = (u || "").trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith("/")) return `https://zozo.jp${s}`;
+  if (/^zozo\.jp/i.test(s)) return `https://${s}`;
+  return `https://${s}`;
+};
 
 // Edge Function 呼び出し（invoke → 直叩きフォールバック）
 async function analyzeFashion(imageUrl: string) {
   try {
     const { data, error } = await supabase.functions.invoke('analyze-fashion', {
-      body: { image_url: imageUrl, mode: 'hf' }, // サーバ側でHF→失敗時Mock
+      body: { image_url: imageUrl, mode: 'hf' },
     });
     if (!error && data) return data;
     console.warn('[AI] invoke error:', error);
@@ -70,7 +78,7 @@ type SelectedProduct = {
   fetched_at?: string | null;
 };
 
-// ---- 追加：外部画像も含めて必ず Storage に取り込むユーティリティ ----
+// ---- 外部/ローカル画像を必ず Supabase Storage に取り込む ----
 function guessExtAndType(urlOrPath: string): { ext: 'jpg'|'jpeg'|'png'|'webp', type: string } {
   const u = urlOrPath.split('?')[0].toLowerCase();
   if (u.endsWith('.png'))  return { ext: 'png',  type: 'image/png' };
@@ -78,27 +86,16 @@ function guessExtAndType(urlOrPath: string): { ext: 'jpg'|'jpeg'|'png'|'webp', t
   if (u.endsWith('.jpeg')) return { ext: 'jpeg', type: 'image/jpeg' };
   return { ext: 'jpg', type: 'image/jpeg' };
 }
-
-/**
- * src が file:// でも https:// でも、必ず posts バケットにアップロードして
- * 公開URLを返す。投稿画のURLを一律 Supabase Storage 化するための関数。
- */
 async function ensureImageInStorage(src: string, uid: string): Promise<string> {
   if (!uid) throw new Error('login required');
   const key = `${uid}/${Date.now()}`;
-
   if (/^https?:\/\//i.test(src)) {
-    // 外部URLはそのまま fetch → Storage へ put（拡張子/Content-Type を推定）
     const { ext, type } = guessExtAndType(src);
-    const { publicUrl } = await uploadImageFromUri({
-      uri: src, key, bucket: 'posts', contentType: type, ext,
-    });
+    const { publicUrl } = await uploadImageFromUri({ uri: src, key, bucket: 'posts', contentType: type, ext });
     return publicUrl;
   } else {
-    // ローカルは JPEG に圧縮してからアップロード（安定）
     const conv = await ImageManipulator.manipulateAsync(
-      src,
-      [{ resize: { width: 900 } }],
+      src, [{ resize: { width: 900 } }],
       { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
     );
     const { publicUrl } = await uploadImageFromUri({
@@ -135,7 +132,7 @@ export default function PostPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const categories = ['カジュアル','スマート','フェミニン','モード','アウトドア'] as const;
-  const [category, setCategory] = useState<string | null>(null); // 手動5択
+  const [category, setCategory] = useState<string | null>(null);
 
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
@@ -166,7 +163,7 @@ export default function PostPage() {
       const r = await fetch(RESOLVE_PRODUCT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: productUrl.trim() }),
+        body: JSON.stringify({ url: normalizeUrl(productUrl) }),
       });
       const json = await r.json();
       if (!r.ok || !json?.ok) throw new Error(json?.error || `HTTP ${r.status}`);
@@ -179,22 +176,17 @@ export default function PostPage() {
     }
   };
 
-  // --- 自動選択：現在の画像で推論して5択に反映（成功=静かに選択, 失敗=ポップ） ---
   const autoPickCategory = async () => {
     try {
       setAutoPicking(true);
-
-      // 推論に使う公開URLを確保（file:// の場合は一時アップロード）
       let targetUrl: string | null = null;
       if (mainImage) {
-        if (/^https?:\/\//i.test(mainImage)) {
-          targetUrl = mainImage;
-        } else {
+        if (/^https?:\/\//i.test(mainImage)) targetUrl = mainImage;
+        else {
           if (!uid) throw new Error('ログインが必要です');
           const key = `${uid}/tmp/autocls-${Date.now()}`;
           const conv = await ImageManipulator.manipulateAsync(
-            mainImage,
-            [{ resize: { width: 600 } }],
+            mainImage, [{ resize: { width: 600 } }],
             { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
           );
           const { publicUrl } = await uploadImageFromUri({
@@ -203,18 +195,14 @@ export default function PostPage() {
           targetUrl = publicUrl;
         }
       } else if (productPreview?.image) {
-        targetUrl = productPreview.image; // 推論は外部でも可（ここは表示影響なし）
+        targetUrl = productPreview.image;
       }
 
-      if (!targetUrl) {
-        Alert.alert('失敗しました。もう一度お試しください。');
-        return;
-      }
+      if (!targetUrl) { Alert.alert('失敗しました。もう一度お試しください。'); return; }
 
       const once: any = await analyzeFashion(targetUrl);
       let predicted = once?.category as string | undefined;
       const ok = categories.includes((predicted as any) ?? '');
-
       if (!ok) {
         const twice: any = await analyzeFashion(targetUrl);
         predicted = twice?.category as string | undefined;
@@ -223,8 +211,7 @@ export default function PostPage() {
           return;
         }
       }
-
-      setCategory(predicted!); // 成功 → 静かに5択へ反映
+      setCategory(predicted!);
     } catch {
       Alert.alert('失敗しました。もう一度お試しください。');
     } finally {
@@ -242,16 +229,13 @@ export default function PostPage() {
     try {
       setSubmitting(true);
 
-      // 1) メイン画像の公開URLを「必ず Storage 経由」で用意（ここが今回の修正ポイント）
       let uploadedMainUrl: string;
       if (mainImage) {
         uploadedMainUrl = await ensureImageInStorage(mainImage, uid);
       } else {
-        // 商品プレビューのみのケースも必ず Storage へ取り込む
         uploadedMainUrl = await ensureImageInStorage(productPreview!.image!, uid);
       }
 
-      // 2) 手動未選択なら、ここでもAIで初期値補完
       let aiCategory: string | null = null;
       let aiLabels: any = null;
       if (!category && uploadedMainUrl) {
@@ -262,16 +246,15 @@ export default function PostPage() {
         } catch {}
       }
 
-      // 3) posts へ保存（手動＞AI）
       const finalCategory = category ?? aiCategory ?? null;
       const meta = { category: finalCategory ?? '', topsUrl, bottomsUrl, outerwearUrl, shoesUrl };
 
       const payload: any = {
         owner_id: uid,
-        image_url: uploadedMainUrl,   // ← 常に Supabase Storage のURL
-        caption: JSON.stringify(meta), // 列が無ければ削除OK
-        lat,                           // 列が無ければ削除OK
-        lng,                           // 列が無ければ削除OK
+        image_url: uploadedMainUrl,
+        caption: JSON.stringify(meta),
+        lat,
+        lng,
         selected_product: productPreview ?? null,
         category: finalCategory,
         ai_labels: aiLabels,
