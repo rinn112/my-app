@@ -42,6 +42,13 @@ function shot(u:string){return "https://image.thum.io/get/width/1200/noanimate/"
 
 
 
+
+function dedupeUrl(s:string){
+  try{
+    const t=String(s).trim();
+    return t.replace(/(https?:\/\/[^\s]+?)\1+/,'$1');
+  }catch{ return String(s); }
+}
 // Edge Function 呼び出し（invoke → 直叩きフォールバック）
 async function analyzeFashion(imageUrl: string) {
   try {
@@ -166,11 +173,20 @@ export default function PostPage() {
       const r = await fetch(RESOLVE_PRODUCT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: normalizeUrl(productUrl) }),
+        body: JSON.stringify({ url: dedupeUrl(normalizeUrl(productUrl)) }),
       });
       const json = await r.json();
       if (!r.ok || !json?.ok) throw new Error(json?.error || `HTTP ${r.status}`);
-      const prod: any = json.product || {}; if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); console.log("[ui] preview.image =", prod?.image); setProductPreview(prod);
+      const prod: any = json.product || {};
+if (prod.url) prod.url = dedupeUrl(prod.url);
+if (prod.image && String(prod.image).includes("image.thum.io")) {
+  const tail = String(prod.image).split("noanimate/")[1]||"";
+  try {
+    const raw = decodeURIComponent(tail);
+    const fixed = dedupeUrl(raw);
+    prod.image = "https://image.thum.io/get/width/1200/noanimate/" + encodeURIComponent(fixed);
+  } catch {}
+} if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); console.log("[ui] preview.image =", prod?.image); setProductPreview(prod);
     } catch (e: any) {
       Alert.alert('取得に失敗しました', String(e?.message || e));
       setProductPreview(null);
@@ -187,12 +203,12 @@ export default function PostPage() {
       const r = await fetch(RESOLVE_PRODUCT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: normalizeUrl(raw) }),
+        body: JSON.stringify({ url: dedupeUrl(normalizeUrl(raw)) }),
       });
       const json = await r.json();
       if (!r.ok || !json?.ok) throw new Error(json?.error || `HTTP ${r.status}`);
 
-      const canonical: string = json.product?.url || normalizeUrl(raw);
+      const canonical: string = dedupeUrl(json.product?.url || normalizeUrl(raw));
       const image: string = json.product?.image || shot(canonical);
 
       switch (field) {
