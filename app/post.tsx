@@ -38,6 +38,10 @@ const normalizeUrl = (u: string) => {
   return `https://${s}`;
 };
 
+function shot(u:string){return "https://image.thum.io/get/width/1200/noanimate/"+encodeURIComponent(u);} 
+
+
+
 // Edge Function 呼び出し（invoke → 直叩きフォールバック）
 async function analyzeFashion(imageUrl: string) {
   try {
@@ -166,7 +170,7 @@ export default function PostPage() {
       });
       const json = await r.json();
       if (!r.ok || !json?.ok) throw new Error(json?.error || `HTTP ${r.status}`);
-      setProductPreview(json.product as SelectedProduct);
+      const prod: any = json.product || {}; if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); setProductPreview(prod);
     } catch (e: any) {
       Alert.alert('取得に失敗しました', String(e?.message || e));
       setProductPreview(null);
@@ -188,8 +192,8 @@ export default function PostPage() {
       const json = await r.json();
       if (!r.ok || !json?.ok) throw new Error(json?.error || `HTTP ${r.status}`);
 
-      const image: string | undefined = json.product?.image || undefined;
       const canonical: string = json.product?.url || normalizeUrl(raw);
+      const image: string = json.product?.image || shot(canonical);
 
       switch (field) {
         case 'tops': setTopsUrl(image || ''); break;
