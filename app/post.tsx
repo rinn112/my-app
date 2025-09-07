@@ -1,3 +1,4 @@
+function decodeThumUrl(u?:string){try{if(!u)return u as any;const s=String(u);if(s.includes("image.thum.io")&&s.includes("noanimate/")){const tail=s.split("noanimate/")[1]||"";const raw=decodeURIComponent(tail);return "https://image.thum.io/get/width/1200/noanimate/"+raw;}return s;}catch{return u as any;}}
 import { Ionicons } from '@expo/vector-icons';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
@@ -199,7 +200,7 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
     const fixed = dedupeUrl(raw);
     prod.image = "https://image.thum.io/get/width/1200/noanimate/" + encodeURIComponent(fixed);
   } catch {}
-} if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); console.log("[ui] preview.image =", prod?.image); prod.image = decodeThum(prod.image); setProductPreview(prod);
+} if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); console.log("[ui] preview.image =", prod?.image); prod.image = decodeThum(prod.image); prod.image = decodeThumUrl(prod.image); setProductPreview(prod);
     } catch (e: any) {
       Alert.alert('取得に失敗しました', String(e?.message || e));
       setProductPreview(null);
@@ -222,7 +223,7 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
       if (!r.ok || !json?.ok) throw new Error(json?.error || `HTTP ${r.status}`);
 
       const canonical: string = dedupeUrl(json.product?.url || normalizeUrl(raw));
-      const image: string = decodeThum(json.product?.image || shot(canonical));
+      const image: string = decodeThum(decodeThumUrl(json.product?.image || shot(canonical)));
 
       switch (field) {
         case 'tops': setTopsUrl(image || ''); break;
@@ -361,7 +362,7 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
         <AppText style={styles.label}>{label}</AppText>
         <TouchableOpacity onPress={() => setEditingField(field)} activeOpacity={0.85}>
           {showImage ? (
-            <ExpoImage source={{ uri }} style={styles.itemImage} contentFit="cover" cachePolicy="none" />
+            <ExpoImage source={{ uri: decodeThumUrl(uri) }} style={styles.itemImage} contentFit="cover" cachePolicy="none" />
           ) : (
             <View style={[styles.itemImage, styles.placeholder]}>
               <AppText style={styles.placeholderText}>タップしてURL入力</AppText>
@@ -462,7 +463,7 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
               {productPreview && (
                 <View style={{ marginTop:10, borderWidth:1, borderColor:'#eee', borderRadius:12, overflow:'hidden', backgroundColor:'#fff' }}>
                   {!!productPreview.image ? (
-                    <ExpoImage source={productPreview?.image ? { uri: productPreview.image } : undefined}
+                    <ExpoImage source={productPreview?.image ? { uri: decodeThumUrl(productPreview.image) } : undefined}
     style={{ width:'100%', height:240, borderRadius:12, backgroundColor:'#eee' }}
     contentFit="cover" cachePolicy="none" transition={150} />
                   ) : (
