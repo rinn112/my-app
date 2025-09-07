@@ -28,7 +28,7 @@ const PROJECT_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://xqyztcyliqb
 const ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 // 商品URLプレビューAPI（既存）
-const RESOLVE_PRODUCT_URL = 'https://fashion-ai-rayw6a068-mayu-shimamuras-projects.vercel.app/api/resolve-product';
+const RESOLVE_PRODUCT_URL = 'https://fashion-ai-pd7f25pkb-mayu-shimamuras-projects.vercel.app/api/resolve-product';
 
 // Edge Function 呼び出し（invoke → 直叩きフォールバック）
 async function analyzeFashion(imageUrl: string) {
