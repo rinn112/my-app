@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 
+import { Image as ExpoImage } from 'expo-image';
 import AppText from '../components/AppText';
 import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
@@ -348,7 +349,7 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
         <AppText style={styles.label}>{label}</AppText>
         <TouchableOpacity onPress={() => setEditingField(field)} activeOpacity={0.85}>
           {showImage ? (
-            <Image source={{ uri }} style={styles.itemImage} />
+            <ExpoImage source={{ uri }} style={styles.itemImage} contentFit="cover" />
           ) : (
             <View style={[styles.itemImage, styles.placeholder]}>
               <AppText style={styles.placeholderText}>タップしてURL入力</AppText>
@@ -449,7 +450,9 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
               {productPreview && (
                 <View style={{ marginTop:10, borderWidth:1, borderColor:'#eee', borderRadius:12, overflow:'hidden', backgroundColor:'#fff' }}>
                   {!!productPreview.image ? (
-                    <Image source={{ uri: productPreview.image }} style={{ width:'100%', height:200 }} resizeMode="cover" />
+                    <ExpoImage source={productPreview?.image ? { uri: productPreview.image } : undefined}
+    style={{ width:'100%', height:240, borderRadius:12, backgroundColor:'#eee' }}
+    contentFit="cover" transition={150} />
                   ) : (
                     <View style={{ width:'100%', height:200, alignItems:'center', justifyContent:'center' }}>
                       <Text style={{ color:'#888' }}>画像が取得できませんでした</Text>
@@ -505,7 +508,7 @@ const styles = StyleSheet.create({
   scroll:{ flex:1 },
   content:{ padding:20, paddingBottom:40 },
   backButton:{ position:'absolute', top:50, left:20, zIndex:10 },
-  mainImage:{ width:'80%', alignSelf:'center', aspectRatio:3/4, borderRadius:16, backgroundColor:'#eee', marginBottom:16 },
+  mainImage:{ width:'80%', alignSelf:'center', height:180, borderRadius:16, backgroundColor:'#eee', marginBottom:16 },
 
   headerRow:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:8, paddingHorizontal:4 },
   categoryTitle:{ fontSize:22, fontWeight:'600' },
@@ -520,7 +523,7 @@ const styles = StyleSheet.create({
 
   row:{ flexDirection:'row', justifyContent:'space-between', gap:20, width:'93%', alignSelf:'center', marginBottom:40 },
   column:{ flex:1, alignItems:'center' },
-  itemImage:{ width:'100%', aspectRatio:3/4, borderRadius:8, backgroundColor:'#eee' },
+  itemImage:{  width:'100%', height:180, borderRadius:8, backgroundColor:'#eee'  },
   placeholder:{ alignItems:'center', justifyContent:'center' },
   placeholderText:{ color:'#999', fontSize:12 },
   label:{ fontSize:22, fontWeight:'600', marginBottom:10 },
