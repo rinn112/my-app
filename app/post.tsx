@@ -24,9 +24,44 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { uploadImageFromUri } from '../lib/uploadImage';
 
-// post.tsx
-const RESOLVE_PRODUCT_URL = 'https://fashion-ai-api.vercel.app/api/resolve-product';
+const PROJECT_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://xqyztcyliqbhpdekmpjx.supabase.co';
+const ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
+// 商品URLプレビューAPI（既存）
+const RESOLVE_PRODUCT_URL = 'https://fashion-ai-fqvgbj1bs-mayu-shimamuras-projects.vercel.app/api/resolve-product';
+
+// Edge Function 呼び出し（invoke → 直叩きフォールバック）
+async function analyzeFashion(imageUrl: string) {
+  // 1) invoke（ユーザーセッションで呼ぶ）
+  try {
+    const { data, error } = await supabase.functions.invoke('analyze-fashion', {
+      body: { image_url: imageUrl, mode: 'hf' }, // サーバ側でHF→失敗時Mock
+    });
+    if (!error && data) return data;
+    console.warn('[AI] invoke error:', error);
+  } catch (e: any) {
+    console.warn('[AI] invoke throw:', e?.message || e);
+  }
+  // 2) 直叩き（curlと同等・CORS/401切り分け）
+  try {
+    const r = await fetch(`${PROJECT_URL}/functions/v1/analyze-fashion`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${ANON}`,
+        'apikey': ANON,
+      },
+      body: JSON.stringify({ image_url: imageUrl, mode: 'hf' }),
+    });
+    const json = await r.json().catch(() => ({}));
+    if (r.ok) return json;
+    console.warn('[AI] direct fetch failed:', r.status, json);
+    return { error: json?.error || `HTTP ${r.status}` };
+  } catch (e: any) {
+    console.warn('[AI] direct fetch throw:', e?.message || e);
+    return { error: String(e?.message || e) };
+  }
+}
 
 type SelectedProduct = {
   url: string;
@@ -47,11 +82,15 @@ export default function PostPage() {
 
   const [mainImage, setMainImage] = useState<string | undefined>(params.mainImage);
 
-  // 追加: 商品URL→プレビュー
+  // 商品URL→プレビュー
   const [productUrl, setProductUrl] = useState('');
   const [productPreview, setProductPreview] = useState<SelectedProduct | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
+  // 自動選択処理中フラグ（ボタンのスピナー制御）
+  const [autoPicking, setAutoPicking] = useState(false);
+
+  // 投稿処理関連
   const [topsUrl, setTopsUrl] = useState('');
   const [bottomsUrl, setBottomsUrl] = useState('');
   const [outerwearUrl, setOuterwearUrl] = useState('');
@@ -59,8 +98,8 @@ export default function PostPage() {
   const [editingField, setEditingField] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const categories = ['カジュアル','スマート','フェミニン','モード','アウトドア'];
-  const [category, setCategory] = useState<string | null>(null);
+  const categories = ['カジュアル','スマート','フェミニン','モード','アウトドア'] as const;
+  const [category, setCategory] = useState<string | null>(null); // 手動5択
 
   const [latitude, setLatitude] = useState<number | null>(null);
   const [longitude, setLongitude] = useState<number | null>(null);
@@ -104,6 +143,61 @@ export default function PostPage() {
     }
   };
 
+  // --- 自動選択：現在の画像で推論して5択に反映（成功=静かに選択, 失敗=ポップ） ---
+  const autoPickCategory = async () => {
+    try {
+      setAutoPicking(true);
+
+      // 推論に使う公開URLを確保（file:// の場合は一時アップロード）
+      let targetUrl: string | null = null;
+      if (mainImage) {
+        if (/^https?:\/\//i.test(mainImage)) {
+          targetUrl = mainImage;
+        } else {
+          if (!uid) throw new Error('ログインが必要です');
+          const conv = await ImageManipulator.manipulateAsync(
+            mainImage,
+            [{ resize: { width: 600 } }],
+            { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+          );
+          const key = `${uid}/tmp/autocls-${Date.now()}`;
+          const { publicUrl } = await uploadImageFromUri({
+            uri: conv.uri, key, bucket: 'posts', contentType: 'image/jpeg', ext: 'jpg',
+          });
+          targetUrl = publicUrl;
+        }
+      } else if (productPreview?.image) {
+        targetUrl = productPreview.image; // 外部CDN直リンク
+      }
+
+      if (!targetUrl) {
+        Alert.alert('失敗しました。もう一度お試しください。'); // 画像未選択
+        return;
+      }
+
+      // 推論（2回まで）
+      const once: any = await analyzeFashion(targetUrl);
+      let predicted = once?.category as string | undefined;
+      const ok = categories.includes((predicted as any) ?? '');
+
+      if (!ok) {
+        const twice: any = await analyzeFashion(targetUrl);
+        predicted = twice?.category as string | undefined;
+        if (!categories.includes((predicted as any) ?? '')) {
+          Alert.alert('失敗しました。もう一度お試しください。');
+          return;
+        }
+      }
+
+      // 成功 → 静かに5択へ反映
+      setCategory(predicted!);
+    } catch {
+      Alert.alert('失敗しました。もう一度お試しください。');
+    } finally {
+      setAutoPicking(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!uid) { Alert.alert('ログインが必要です'); return; }
     if (!mainImage && !productPreview?.image) { Alert.alert('メイン画像を選択してください'); return; }
@@ -114,37 +208,51 @@ export default function PostPage() {
     try {
       setSubmitting(true);
 
-      // 1) メイン画像（自身の写真 or 取得画像）をStorageへ
+      // 1) メイン画像の公開URLを用意
       let uploadedMainUrl: string | null = null;
       if (mainImage) {
-        const conv = await ImageManipulator.manipulateAsync(
-          mainImage,
-          [{ resize: { width: 600 } }],
-          { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
-        );
-        const key = `${uid}/${Date.now()}`;
-        const { publicUrl } = await uploadImageFromUri({
-          uri: conv.uri,
-          key,
-          bucket: 'posts',
-          contentType: 'image/jpeg',
-          ext: 'jpg',
-        });
-        uploadedMainUrl = publicUrl;
+        if (/^https?:\/\//i.test(mainImage)) {
+          uploadedMainUrl = mainImage;
+        } else {
+          const conv = await ImageManipulator.manipulateAsync(
+            mainImage,
+            [{ resize: { width: 600 } }],
+            { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+          );
+          const key = `${uid}/${Date.now()}`;
+          const { publicUrl } = await uploadImageFromUri({
+            uri: conv.uri, key, bucket: 'posts', contentType: 'image/jpeg', ext: 'jpg',
+          });
+          uploadedMainUrl = publicUrl;
+        }
       } else if (productPreview?.image) {
-        // 直接URLをメインに（外部CDNのまま）
         uploadedMainUrl = productPreview.image;
       }
 
-      // 2) posts に insert
-      const meta = { category: category ?? '', topsUrl, bottomsUrl, outerwearUrl, shoesUrl };
+      // 2) 手動未選択なら、ここでもAIで初期値補完
+      let aiCategory: string | null = null;
+      let aiLabels: any = null;
+      if (!category && uploadedMainUrl) {
+        try {
+          const ai: any = await analyzeFashion(uploadedMainUrl);
+          aiCategory = (ai?.category as string) ?? null;
+          aiLabels = ai?.ai_labels ?? null;
+        } catch {}
+      }
+
+      // 3) posts へ保存（手動＞AI）
+      const finalCategory = category ?? aiCategory ?? null;
+      const meta = { category: finalCategory ?? '', topsUrl, bottomsUrl, outerwearUrl, shoesUrl };
+
       const payload: any = {
         owner_id: uid,
         image_url: uploadedMainUrl,
-        caption: JSON.stringify(meta),     // ← 列が無ければ削除
-        lat,                                // ← 列が無ければ削除
-        lng,                                // ← 列が無ければ削除
-        selected_product: productPreview ?? null, // ★追加
+        caption: JSON.stringify(meta), // 列が無ければ削除OK
+        lat,                           // 列が無ければ削除OK
+        lng,                           // 列が無ければ削除OK
+        selected_product: productPreview ?? null,
+        category: finalCategory,
+        ai_labels: aiLabels,
       };
 
       const { error } = await supabase.from('posts').insert(payload).select('id').single();
@@ -196,7 +304,7 @@ export default function PostPage() {
 
         <KeyboardAvoidingView style={{ flex:1 }} behavior={Platform.OS==='ios' ? 'padding' : undefined}>
           <ScrollView style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-            {/* メイン画像（自分の画像 or 取得画像をセット可能） */}
+            {/* メイン画像 */}
             <TouchableOpacity onPress={() => pickImage(setMainImage)} activeOpacity={0.85}>
               {mainImage ? (
                 <Image source={{ uri: mainImage }} style={styles.mainImage} />
@@ -207,9 +315,28 @@ export default function PostPage() {
               )}
             </TouchableOpacity>
 
-            {/* 商品URL → プレビュー → メインに設定/保存 */}
+            {/* 服の雰囲気 + 自動選択ボタン */}
+            <View style={styles.headerRow}>
+              <AppText style={styles.categoryTitle}>服の雰囲気</AppText>
+              <TouchableOpacity onPress={autoPickCategory} style={styles.autoBtn} activeOpacity={0.85} disabled={autoPicking}>
+                {autoPicking ? <ActivityIndicator /> : <Text style={styles.autoBtnText}>自動選択</Text>}
+              </TouchableOpacity>
+            </View>
+
+            {/* 5択 */}
+            <View style={styles.categoryRow}>
+              {categories.map((c) => (
+                <TouchableOpacity key={c}
+                  style={[styles.categoryBtn, { backgroundColor: category===c ? '#FF6EF5' : '#E5C2FF' }]}
+                  onPress={() => setCategory(c)}>
+                  <AppText style={styles.categoryText}>{c}</AppText>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* 商品URL → プレビュー */}
             <View style={{ marginTop: 6 }}>
-              <AppText style={styles.categoryTitle}>商品URL（任意）</AppText>
+              <AppText style={styles.sectionTitle}>商品URL（任意）</AppText>
               <View style={{ flexDirection:'row', gap:8, alignItems:'center' }}>
                 <TextInput
                   style={[styles.input, { flex:1, height:44 }]}
@@ -267,17 +394,7 @@ export default function PostPage() {
               )}
             </View>
 
-            <AppText style={[styles.categoryTitle, { marginTop:20 }]}>服の雰囲気</AppText>
-            <View style={styles.categoryRow}>
-              {categories.map((c) => (
-                <TouchableOpacity key={c}
-                  style={[styles.categoryBtn, { backgroundColor: category===c ? '#FF6EF5' : '#E5C2FF' }]}
-                  onPress={() => setCategory(c)}>
-                  <AppText style={styles.categoryText}>{c}</AppText>
-                </TouchableOpacity>
-              ))}
-            </View>
-
+            {/* 部位画像入力 */}
             <View style={styles.row}>
               {renderEditableImage('Tops', topsUrl, setTopsUrl, 'tops')}
               {renderEditableImage('Bottoms/Skirt', bottomsUrl, setBottomsUrl, 'bottoms')}
@@ -287,9 +404,12 @@ export default function PostPage() {
               {renderEditableImage('Shoes', shoesUrl, setShoesUrl, 'shoes')}
             </View>
 
-            <TouchableOpacity style={[styles.submitButton, submitting && { opacity:0.6 }]}
-              onPress={handleSubmit} disabled={submitting}>
-              <AppText style={styles.submitText}>{submitting ? '投稿中…' : '投稿する'}</AppText>
+            {/* 送信ボタン */}
+            <TouchableOpacity style={[styles.submitButton, (submitting || autoPicking) && { opacity:0.6 }]}
+              onPress={handleSubmit} disabled={submitting || autoPicking}>
+              <AppText style={styles.submitText}>
+                {submitting ? '投稿中…' : '投稿する'}
+              </AppText>
             </TouchableOpacity>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -303,11 +423,19 @@ const styles = StyleSheet.create({
   scroll:{ flex:1 },
   content:{ padding:20, paddingBottom:40 },
   backButton:{ position:'absolute', top:50, left:20, zIndex:10 },
-  mainImage:{ width:'80%', alignSelf:'center', aspectRatio:3/4, borderRadius:16, backgroundColor:'#eee', marginBottom:30 },
-  categoryTitle:{ fontSize:22, fontWeight:'600', marginBottom:12, textAlign:'left' },
+  mainImage:{ width:'80%', alignSelf:'center', aspectRatio:3/4, borderRadius:16, backgroundColor:'#eee', marginBottom:16 },
+
+  headerRow:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:8, paddingHorizontal:4 },
+  categoryTitle:{ fontSize:22, fontWeight:'600' },
+  autoBtn:{ backgroundColor:'#FF6EF5', paddingHorizontal:14, paddingVertical:10, borderRadius:12 },
+  autoBtnText:{ color:'#fff', fontWeight:'700' },
+
+  sectionTitle:{ fontSize:22, fontWeight:'600', marginBottom:12, textAlign:'left' },
+
   categoryRow:{ flexDirection:'row', flexWrap:'wrap', justifyContent:'center', marginBottom:20 },
   categoryBtn:{ paddingHorizontal:16, paddingVertical:10, borderRadius:20, margin:6, minWidth:90, alignItems:'center' },
   categoryText:{ color:'#111', fontWeight:'600' },
+
   row:{ flexDirection:'row', justifyContent:'space-between', gap:20, width:'93%', alignSelf:'center', marginBottom:40 },
   column:{ flex:1, alignItems:'center' },
   itemImage:{ width:'100%', aspectRatio:3/4, borderRadius:8, backgroundColor:'#eee' },
@@ -315,7 +443,7 @@ const styles = StyleSheet.create({
   placeholderText:{ color:'#999', fontSize:12 },
   label:{ fontSize:22, fontWeight:'600', marginBottom:10 },
   input:{ backgroundColor:'#fff', borderRadius:8, padding:10, borderWidth:1, borderColor:'#ccc' },
+
   submitButton:{ marginTop:10, backgroundColor:'#FF2EDA', paddingHorizontal:24, paddingVertical:12, borderRadius:24, alignItems:'center' },
   submitText:{ color:'#fff', fontWeight:'bold', fontSize:20 },
 });
-
