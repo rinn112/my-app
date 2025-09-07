@@ -28,11 +28,10 @@ const PROJECT_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? 'https://xqyztcyliqb
 const ANON = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 // 商品URLプレビューAPI（既存）
-const RESOLVE_PRODUCT_URL = 'https://fashion-ai-fqvgbj1bs-mayu-shimamuras-projects.vercel.app/api/resolve-product';
+const RESOLVE_PRODUCT_URL = 'https://fashion-ai-lvu79gdle-mayu-shimamuras-projects.vercel.app/api/resolve-product';
 
 // Edge Function 呼び出し（invoke → 直叩きフォールバック）
 async function analyzeFashion(imageUrl: string) {
-  // 1) invoke（ユーザーセッションで呼ぶ）
   try {
     const { data, error } = await supabase.functions.invoke('analyze-fashion', {
       body: { image_url: imageUrl, mode: 'hf' }, // サーバ側でHF→失敗時Mock
@@ -42,7 +41,6 @@ async function analyzeFashion(imageUrl: string) {
   } catch (e: any) {
     console.warn('[AI] invoke throw:', e?.message || e);
   }
-  // 2) 直叩き（curlと同等・CORS/401切り分け）
   try {
     const r = await fetch(`${PROJECT_URL}/functions/v1/analyze-fashion`, {
       method: 'POST',
@@ -72,6 +70,44 @@ type SelectedProduct = {
   fetched_at?: string | null;
 };
 
+// ---- 追加：外部画像も含めて必ず Storage に取り込むユーティリティ ----
+function guessExtAndType(urlOrPath: string): { ext: 'jpg'|'jpeg'|'png'|'webp', type: string } {
+  const u = urlOrPath.split('?')[0].toLowerCase();
+  if (u.endsWith('.png'))  return { ext: 'png',  type: 'image/png' };
+  if (u.endsWith('.webp')) return { ext: 'webp', type: 'image/webp' };
+  if (u.endsWith('.jpeg')) return { ext: 'jpeg', type: 'image/jpeg' };
+  return { ext: 'jpg', type: 'image/jpeg' };
+}
+
+/**
+ * src が file:// でも https:// でも、必ず posts バケットにアップロードして
+ * 公開URLを返す。投稿画のURLを一律 Supabase Storage 化するための関数。
+ */
+async function ensureImageInStorage(src: string, uid: string): Promise<string> {
+  if (!uid) throw new Error('login required');
+  const key = `${uid}/${Date.now()}`;
+
+  if (/^https?:\/\//i.test(src)) {
+    // 外部URLはそのまま fetch → Storage へ put（拡張子/Content-Type を推定）
+    const { ext, type } = guessExtAndType(src);
+    const { publicUrl } = await uploadImageFromUri({
+      uri: src, key, bucket: 'posts', contentType: type, ext,
+    });
+    return publicUrl;
+  } else {
+    // ローカルは JPEG に圧縮してからアップロード（安定）
+    const conv = await ImageManipulator.manipulateAsync(
+      src,
+      [{ resize: { width: 900 } }],
+      { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    const { publicUrl } = await uploadImageFromUri({
+      uri: conv.uri, key, bucket: 'posts', contentType: 'image/jpeg', ext: 'jpg',
+    });
+    return publicUrl;
+  }
+}
+
 export default function PostPage() {
   const router = useRouter();
   const params = useLocalSearchParams<{ mainImage?: string }>();
@@ -87,7 +123,7 @@ export default function PostPage() {
   const [productPreview, setProductPreview] = useState<SelectedProduct | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
-  // 自動選択処理中フラグ（ボタンのスピナー制御）
+  // 自動選択処理中フラグ
   const [autoPicking, setAutoPicking] = useState(false);
 
   // 投稿処理関連
@@ -155,27 +191,26 @@ export default function PostPage() {
           targetUrl = mainImage;
         } else {
           if (!uid) throw new Error('ログインが必要です');
+          const key = `${uid}/tmp/autocls-${Date.now()}`;
           const conv = await ImageManipulator.manipulateAsync(
             mainImage,
             [{ resize: { width: 600 } }],
             { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
           );
-          const key = `${uid}/tmp/autocls-${Date.now()}`;
           const { publicUrl } = await uploadImageFromUri({
             uri: conv.uri, key, bucket: 'posts', contentType: 'image/jpeg', ext: 'jpg',
           });
           targetUrl = publicUrl;
         }
       } else if (productPreview?.image) {
-        targetUrl = productPreview.image; // 外部CDN直リンク
+        targetUrl = productPreview.image; // 推論は外部でも可（ここは表示影響なし）
       }
 
       if (!targetUrl) {
-        Alert.alert('失敗しました。もう一度お試しください。'); // 画像未選択
+        Alert.alert('失敗しました。もう一度お試しください。');
         return;
       }
 
-      // 推論（2回まで）
       const once: any = await analyzeFashion(targetUrl);
       let predicted = once?.category as string | undefined;
       const ok = categories.includes((predicted as any) ?? '');
@@ -189,8 +224,7 @@ export default function PostPage() {
         }
       }
 
-      // 成功 → 静かに5択へ反映
-      setCategory(predicted!);
+      setCategory(predicted!); // 成功 → 静かに5択へ反映
     } catch {
       Alert.alert('失敗しました。もう一度お試しください。');
     } finally {
@@ -208,25 +242,13 @@ export default function PostPage() {
     try {
       setSubmitting(true);
 
-      // 1) メイン画像の公開URLを用意
-      let uploadedMainUrl: string | null = null;
+      // 1) メイン画像の公開URLを「必ず Storage 経由」で用意（ここが今回の修正ポイント）
+      let uploadedMainUrl: string;
       if (mainImage) {
-        if (/^https?:\/\//i.test(mainImage)) {
-          uploadedMainUrl = mainImage;
-        } else {
-          const conv = await ImageManipulator.manipulateAsync(
-            mainImage,
-            [{ resize: { width: 600 } }],
-            { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
-          );
-          const key = `${uid}/${Date.now()}`;
-          const { publicUrl } = await uploadImageFromUri({
-            uri: conv.uri, key, bucket: 'posts', contentType: 'image/jpeg', ext: 'jpg',
-          });
-          uploadedMainUrl = publicUrl;
-        }
-      } else if (productPreview?.image) {
-        uploadedMainUrl = productPreview.image;
+        uploadedMainUrl = await ensureImageInStorage(mainImage, uid);
+      } else {
+        // 商品プレビューのみのケースも必ず Storage へ取り込む
+        uploadedMainUrl = await ensureImageInStorage(productPreview!.image!, uid);
       }
 
       // 2) 手動未選択なら、ここでもAIで初期値補完
@@ -246,7 +268,7 @@ export default function PostPage() {
 
       const payload: any = {
         owner_id: uid,
-        image_url: uploadedMainUrl,
+        image_url: uploadedMainUrl,   // ← 常に Supabase Storage のURL
         caption: JSON.stringify(meta), // 列が無ければ削除OK
         lat,                           // 列が無ければ削除OK
         lng,                           // 列が無ければ削除OK
@@ -325,7 +347,7 @@ export default function PostPage() {
 
             {/* 5択 */}
             <View style={styles.categoryRow}>
-              {categories.map((c) => (
+              {(['カジュアル','スマート','フェミニン','モード','アウトドア'] as const).map((c) => (
                 <TouchableOpacity key={c}
                   style={[styles.categoryBtn, { backgroundColor: category===c ? '#FF6EF5' : '#E5C2FF' }]}
                   onPress={() => setCategory(c)}>
