@@ -198,9 +198,12 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
   try {
     const raw = decodeURIComponent(tail);
     const fixed = dedupeUrl(raw);
-    prod.image = "https://image.thum.io/get/width/1200/noanimate/" + encodeURIComponent(fixed);
+    prod.image = "https://image.thum.io/get/width/1200/noanimate/" + fixed;
   } catch {}
-} if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); console.log("[ui] preview.image =", prod?.image); prod.image = decodeThum(prod.image); prod.image = decodeThumUrl(prod.image); setProductPreview(prod);
+} if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); console.log("[ui] preview.image =", prod?.image); prod.image = decodeThum(prod.image); prod.image = decodeThumUrl(prod.image); const __img = prod.image || (prod.url ? shot(prod.url) : "");
+prod.image = __img.includes("image.thum.io") ? decodeThumUrl(__img) : __img;
+console.log("[FINAL IMG]", prod.image);
+setProductPreview(prod);
     } catch (e: any) {
       Alert.alert('取得に失敗しました', String(e?.message || e));
       setProductPreview(null);
@@ -362,7 +365,7 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
         <AppText style={styles.label}>{label}</AppText>
         <TouchableOpacity onPress={() => setEditingField(field)} activeOpacity={0.85}>
           {showImage ? (
-            <ExpoImage source={{ uri: decodeThumUrl(uri) }} style={styles.itemImage} contentFit="cover" cachePolicy="none" />
+            <ExpoImage source={{ uri: decodeThumUrl(uri) }} style={styles.itemImage} contentFit="cover" cachePolicy="none"  onError={(e)=>console.log("IMAGE_ERROR", e?.nativeEvent)} />
           ) : (
             <View style={[styles.itemImage, styles.placeholder]}>
               <AppText style={styles.placeholderText}>タップしてURL入力</AppText>
@@ -463,9 +466,9 @@ if (prod.image && String(prod.image).includes("image.thum.io")) {
               {productPreview && (
                 <View style={{ marginTop:10, borderWidth:1, borderColor:'#eee', borderRadius:12, overflow:'hidden', backgroundColor:'#fff' }}>
                   {!!productPreview.image ? (
-                    <ExpoImage source={productPreview?.image ? { uri: decodeThumUrl(productPreview.image) } : undefined}
+                    <ExpoImage source={{ uri: decodeThumUrl(productPreview.image || (productPreview.url ? shot(productPreview.url) : "")) }} : undefined}
     style={{ width:'100%', height:240, borderRadius:12, backgroundColor:'#eee' }}
-    contentFit="cover" cachePolicy="none" transition={150} />
+    contentFit="cover" cachePolicy="none" transition={150}  onError={(e)=>console.log("IMAGE_ERROR", e?.nativeEvent)} />
                   ) : (
                     <View style={{ width:'100%', height:200, alignItems:'center', justifyContent:'center' }}>
                       <Text style={{ color:'#888' }}>画像が取得できませんでした</Text>
