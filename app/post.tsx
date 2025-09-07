@@ -170,7 +170,7 @@ export default function PostPage() {
       });
       const json = await r.json();
       if (!r.ok || !json?.ok) throw new Error(json?.error || `HTTP ${r.status}`);
-      const prod: any = json.product || {}; if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); setProductPreview(prod);
+      const prod: any = json.product || {}; if(!prod.image && prod.url){ prod.image = shot(prod.url); } console.log("[preview]", JSON.stringify(prod).slice(0,200)); console.log("[ui] preview.image =", prod?.image); setProductPreview(prod);
     } catch (e: any) {
       Alert.alert('取得に失敗しました', String(e?.message || e));
       setProductPreview(null);
