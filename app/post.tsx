@@ -465,8 +465,8 @@ setProductPreview(prod);
 
               {productPreview && (
                 <View style={{ marginTop:10, borderWidth:1, borderColor:'#eee', borderRadius:12, overflow:'hidden', backgroundColor:'#fff' }}>
-                  {!!productPreview.image ? (
-                    <ExpoImage source={{ uri: decodeThumUrl(productPreview.image || (productPreview.url ? shot(productPreview.url) : "")) }} : undefined}
+                  { !!(productPreview?.image || productPreview?.url) ? (
+                    <ExpoImage source={{ uri: decodeThumUrl(productPreview?.image || (productPreview?.url ? shot(productPreview.url) : "")) }}}
     style={{ width:'100%', height:240, borderRadius:12, backgroundColor:'#eee' }}
     contentFit="cover" cachePolicy="none" transition={150}  onError={(e)=>console.log("IMAGE_ERROR", e?.nativeEvent)} />
                   ) : (
